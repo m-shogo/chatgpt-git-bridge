@@ -37,6 +37,172 @@ PAT作成
 → 完了
 ```
 
+## 👤 あなたが最初に1回だけやること
+
+通常運用が始まった後はほぼ触りません。最初だけ以下を順番に実施します。
+
+### 1. GitHub Fine-grained PATを作る
+
+GitHubの Fine-grained personal access token を作成します。
+
+最初は対象を絞ります。
+
+```text
+Repository access
+→ Only select repositories
+→ m-shogo/minefa
+```
+
+Repository permissions は最低限:
+
+```text
+Contents: Read and write
+Metadata: Read
+```
+
+作成後に表示されるtokenをコピーしておきます。
+
+**tokenをこのrepo・Code.gs・manifest.jsonへ貼らないでください。**
+
+### 2. Google Apps Scriptを新規作成
+
+スタンドアロンApps Script projectを1つ作ります。
+
+おすすめ名:
+
+```text
+ChatGPT Git Bridge
+```
+
+### 3. `gas/Code.gs` を全部貼る
+
+[`gas/Code.gs`](gas/Code.gs) の内容をApps Script側の `Code.gs` に全コピーします。
+
+現在のDrive folder IDは設定済みなので、**通常はCode.gsを変更しません**。
+
+将来Driveフォルダを作り直した場合だけ、先頭の以下3箇所を変更します。
+
+```javascript
+incomingFolderId: '...'
+processingFolderId: '...'
+failedFolderId: '...'
+```
+
+### 4. `gas/appsscript.json` を全部貼る
+
+Apps ScriptのProject Settingsでmanifest file表示を有効にし、[`gas/appsscript.json`](gas/appsscript.json) を全コピーします。
+
+### 5. Script Propertiesを2個だけ登録する
+
+Apps Script:
+
+```text
+Project Settings
+→ Script Properties
+→ Add script property
+```
+
+1個目:
+
+```text
+Property: GITHUB_TOKEN
+Value:    手順1で作ったFine-grained PAT
+```
+
+2個目:
+
+```text
+Property: ALLOWED_REPOS
+Value:    m-shogo/minefa
+```
+
+複数repoを使うようになったらカンマ区切りです。
+
+```text
+m-shogo/minefa,m-shogo/vamp-pon,m-shogo/wedding-project
+```
+
+コピペ確認用: [`examples/script-properties.template.txt`](examples/script-properties.template.txt)
+
+### 6. `processQueue()` を1回手動実行する
+
+Apps Script editorでfunctionを:
+
+```text
+processQueue
+```
+
+にしてRunします。
+
+Googleからアクセス許可が表示されたら許可します。
+
+queueが空ならGitHubには何も追加されません。この実行はGoogle権限を通すためです。
+
+### 7. `install30MinuteTrigger()` を1回実行する
+
+functionを:
+
+```text
+install30MinuteTrigger
+```
+
+に変更してRunします。
+
+以降 `processQueue()` が30分ごとに自動実行されます。
+
+このinstallerは既存の `processQueue` triggerを削除してから1個作るため、誤って再実行してもtriggerを重複作成しない設計です。
+
+### 8. 最初の実画像テストをする
+
+最初だけ自動30分を待たず、`processQueue()` を手動実行して確認します。
+
+テスト用task:
+
+```text
+ChatGPT-Git-Bridge/
+└─ incoming/
+   └─ minefa/
+      └─ <branch-safe-name>/
+         └─ first-proof/
+            ├─ image.png
+            └─ manifest.json
+```
+
+manifestは通常ChatGPT側で生成します。手動テストしたい場合だけ [`examples/manifest.copy-paste.template.json`](examples/manifest.copy-paste.template.json) を使います。
+
+PASS条件:
+
+```text
+[ ] 指定repo / branch / pathに画像が入る
+[ ] GitHubから読み戻したSHA-256が元画像と一致する
+[ ] 成功後Driveのtask folderが画像+manifestごと消える
+[ ] failedに残っていない
+```
+
+ここまで通ったらセットアップ完了です。
+
+### セットアップ完了後、あなたが普段やること
+
+**基本ありません。**
+
+```text
+ChatGPTで画像生成
+↓
+ChatGPTがDriveへ画像 + manifestを置く
+↓
+30分以内程度でGASが処理
+↓
+Gitへ保存
+↓
+SHA一致確認
+↓
+Driveから自動削除
+```
+
+問題があったときだけDriveの `failed` を見ます。
+
+より詳細な画面操作・エラー対処は [`docs/SETUP.md`](docs/SETUP.md) を参照してください。
+
 ---
 
 ## Current best — 2026-08-11
