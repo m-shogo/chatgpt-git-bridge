@@ -4,15 +4,17 @@ const CONFIG = {
   failedFolderId: '16R0HPmmaXq_fnzIyqv5ggtaqFERh_ueh',
   maxTasksPerRun: 10,
   maxRetries: 3,
+  maxSourceBytes: 10 * 1024 * 1024,
 };
 
 /**
  * Queue contract
  *
- * Drive layout is organizational only:
- * incoming/<repo>/<branch-safe-name>/<task>/image + manifest.json
+ * Drive layout:
+ * <status>/<repo>/<branch-safe-name>/<task>/image + manifest.json
  *
- * manifest.json is authoritative for repo / branch / target path.
+ * The Drive hierarchy is for visibility. manifest.json is authoritative for
+ * repo / branch / destination path.
  */
 function processQueue() {
   const lock = LockService.getScriptLock();
@@ -35,27 +37,42 @@ function processQueue() {
 function processTaskSafely_(taskFolder) {
   const props = PropertiesService.getScriptProperties();
   const retryKey = `retry:${taskFolder.getId()}`;
+  let processingRoute = null;
 
   try {
-    moveTaskToRoot_(taskFolder, CONFIG.processingFolderId);
+    processingRoute = moveTaskToStatus_(taskFolder, CONFIG.processingFolderId);
     processTask_(taskFolder);
     props.deleteProperty(retryKey);
+
+    const parentIds = processingRoute
+      ? [processingRoute.branchFolderId, processingRoute.repoFolderId]
+      : [];
     permanentlyDeleteDriveItem_(taskFolder.getId());
+    cleanupEmptyFolders_(parentIds);
   } catch (error) {
     const retries = Number(props.getProperty(retryKey) || '0') + 1;
     props.setProperty(retryKey, String(retries));
     writeError_(taskFolder, error, retries);
 
     if (!isTransient_(error) || retries >= CONFIG.maxRetries) {
-      moveTaskToRoot_(taskFolder, CONFIG.failedFolderId);
+      const failedRoute = moveTaskToStatus_(taskFolder, CONFIG.failedFolderId);
       props.deleteProperty(retryKey);
+
+      if (processingRoute) {
+        cleanupEmptyFolders_([
+          processingRoute.branchFolderId,
+          processingRoute.repoFolderId,
+        ]);
+      }
+
+      // failedRoute intentionally stays. It is the human-readable evidence path.
+      void failedRoute;
     }
   }
 }
 
 function processTask_(taskFolder) {
-  const manifestFile = getSingleFileByName_(taskFolder, 'manifest.json');
-  const manifest = JSON.parse(manifestFile.getBlob().getDataAsString('UTF-8'));
+  const manifest = readManifest_(taskFolder);
   validateManifest_(manifest);
 
   const allowed = getAllowedRepos_();
@@ -63,20 +80,37 @@ function processTask_(taskFolder) {
     throw new Error(`REPO_NOT_ALLOWED: ${manifest.repo}`);
   }
 
-  const branch = manifest.branch || getDefaultBranch_(manifest.repo);
-  assertBranchExists_(manifest.repo, branch);
+  assertBranchExists_(manifest.repo, manifest.branch);
 
   const source = getSingleFileByName_(taskFolder, manifest.sourceFile);
+  const sourceSize = Number(source.getSize());
+  if (sourceSize > CONFIG.maxSourceBytes) {
+    throw new Error(
+      `SOURCE_TOO_LARGE: bytes=${sourceSize} max=${CONFIG.maxSourceBytes}`,
+    );
+  }
+
   const bytes = source.getBlob().getBytes();
   const localSha = sha256Hex_(bytes);
 
   if (localSha !== String(manifest.sha256).toLowerCase()) {
-    throw new Error(`SOURCE_SHA_MISMATCH: expected=${manifest.sha256} actual=${localSha}`);
+    throw new Error(
+      `SOURCE_SHA_MISMATCH: expected=${manifest.sha256} actual=${localSha}`,
+    );
   }
 
-  const existing = getGithubFileMeta_(manifest.repo, manifest.path, branch);
+  const existing = getGithubFileMeta_(
+    manifest.repo,
+    manifest.path,
+    manifest.branch,
+  );
+
   if (existing.exists) {
-    const currentBytes = getGithubRawBytes_(manifest.repo, manifest.path, branch);
+    const currentBytes = getGithubRawBytes_(
+      manifest.repo,
+      manifest.path,
+      manifest.branch,
+    );
     const currentSha = sha256Hex_(currentBytes);
 
     if (currentSha === localSha) {
@@ -91,22 +125,43 @@ function processTask_(taskFolder) {
   putGithubFile_(
     manifest.repo,
     manifest.path,
-    branch,
+    manifest.branch,
     bytes,
     existing.sha,
     manifest.commitMessage,
   );
 
-  // Upload is not considered successful until bytes are read back from GitHub.
-  const remoteBytes = getGithubRawBytes_(manifest.repo, manifest.path, branch);
+  // HTTP success alone is insufficient. Verify the stored bytes from GitHub.
+  const remoteBytes = getGithubRawBytes_(
+    manifest.repo,
+    manifest.path,
+    manifest.branch,
+  );
   const remoteSha = sha256Hex_(remoteBytes);
   if (remoteSha !== localSha) {
-    throw new Error(`REMOTE_SHA_MISMATCH: expected=${localSha} actual=${remoteSha}`);
+    throw new Error(
+      `REMOTE_SHA_MISMATCH: expected=${localSha} actual=${remoteSha}`,
+    );
+  }
+}
+
+function readManifest_(folder) {
+  const manifestFile = getSingleFileByName_(folder, 'manifest.json');
+  return JSON.parse(manifestFile.getBlob().getDataAsString('UTF-8'));
+}
+
+function readManifestForRouting_(folder) {
+  try {
+    return readManifest_(folder);
+  } catch (_) {
+    return {};
   }
 }
 
 function validateManifest_(m) {
-  if (m.version !== 1) throw new Error(`MANIFEST_UNSUPPORTED_VERSION: ${m.version}`);
+  if (m.version !== 1) {
+    throw new Error(`MANIFEST_UNSUPPORTED_VERSION: ${m.version}`);
+  }
 
   ['taskId', 'repo', 'branch', 'path', 'sourceFile', 'sha256'].forEach(k => {
     if (!m[k] || typeof m[k] !== 'string') {
@@ -117,10 +172,10 @@ function validateManifest_(m) {
   if (!/^[0-9a-fA-F]{64}$/.test(m.sha256)) {
     throw new Error('MANIFEST_INVALID: sha256');
   }
-  if (m.path.startsWith('/') || m.path.includes('..')) {
+  if (m.path.startsWith('/') || m.path.includes('..') || m.path.includes('//')) {
     throw new Error('MANIFEST_INVALID: path');
   }
-  if (m.sourceFile.includes('/') || m.sourceFile.includes('..')) {
+  if (/[\\/]/.test(m.sourceFile) || m.sourceFile.includes('..')) {
     throw new Error('MANIFEST_INVALID: sourceFile');
   }
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(m.repo)) {
@@ -129,12 +184,14 @@ function validateManifest_(m) {
 }
 
 function getAllowedRepos_() {
-  const raw = PropertiesService.getScriptProperties().getProperty('ALLOWED_REPOS') || '';
+  const raw =
+    PropertiesService.getScriptProperties().getProperty('ALLOWED_REPOS') || '';
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 }
 
 function githubHeaders_(accept) {
-  const token = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
+  const token =
+    PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
   if (!token) throw new Error('CONFIG_MISSING: GITHUB_TOKEN');
 
   return {
@@ -144,19 +201,14 @@ function githubHeaders_(accept) {
   };
 }
 
-function getDefaultBranch_(repo) {
-  const r = githubFetch_(`https://api.github.com/repos/${repo}`, {
-    headers: githubHeaders_(),
-  });
-  return JSON.parse(r.getContentText()).default_branch;
-}
-
 function assertBranchExists_(repo, branch) {
-  const url = `https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`;
+  const url =
+    `https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`;
   const r = UrlFetchApp.fetch(url, {
     headers: githubHeaders_(),
     muteHttpExceptions: true,
   });
+
   if (r.getResponseCode() === 404) {
     throw new Error(`BRANCH_NOT_FOUND: ${repo}@${branch}`);
   }
@@ -164,7 +216,9 @@ function assertBranchExists_(repo, branch) {
 }
 
 function getGithubFileMeta_(repo, path, branch) {
-  const url = `https://api.github.com/repos/${repo}/contents/${encodePath_(path)}?ref=${encodeURIComponent(branch)}`;
+  const url =
+    `https://api.github.com/repos/${repo}/contents/${encodePath_(path)}` +
+    `?ref=${encodeURIComponent(branch)}`;
   const r = UrlFetchApp.fetch(url, {
     headers: githubHeaders_(),
     muteHttpExceptions: true,
@@ -177,7 +231,9 @@ function getGithubFileMeta_(repo, path, branch) {
 }
 
 function getGithubRawBytes_(repo, path, branch) {
-  const url = `https://api.github.com/repos/${repo}/contents/${encodePath_(path)}?ref=${encodeURIComponent(branch)}`;
+  const url =
+    `https://api.github.com/repos/${repo}/contents/${encodePath_(path)}` +
+    `?ref=${encodeURIComponent(branch)}`;
   const r = githubFetch_(url, {
     headers: githubHeaders_('application/vnd.github.raw+json'),
   });
@@ -186,13 +242,16 @@ function getGithubRawBytes_(repo, path, branch) {
 
 function putGithubFile_(repo, path, branch, bytes, existingSha, commitMessage) {
   const payload = {
-    message: commitMessage || `assets: import ${path.split('/').pop()} from ChatGPT Drive bridge`,
+    message:
+      commitMessage ||
+      `assets: import ${path.split('/').pop()} from ChatGPT Drive bridge`,
     content: Utilities.base64Encode(bytes),
     branch,
   };
   if (existingSha) payload.sha = existingSha;
 
-  const url = `https://api.github.com/repos/${repo}/contents/${encodePath_(path)}`;
+  const url =
+    `https://api.github.com/repos/${repo}/contents/${encodePath_(path)}`;
   githubFetch_(url, {
     method: 'put',
     contentType: 'application/json',
@@ -202,7 +261,10 @@ function putGithubFile_(repo, path, branch, bytes, existingSha, commitMessage) {
 }
 
 function githubFetch_(url, options) {
-  const r = UrlFetchApp.fetch(url, Object.assign({ muteHttpExceptions: true }, options));
+  const r = UrlFetchApp.fetch(
+    url,
+    Object.assign({ muteHttpExceptions: true }, options),
+  );
   assertGithubSuccess_(r);
   return r;
 }
@@ -211,7 +273,9 @@ function assertGithubSuccess_(response) {
   const code = response.getResponseCode();
   if (code >= 200 && code < 300) return;
 
-  const error = new Error(`GITHUB_HTTP_${code}: ${response.getContentText().slice(0, 500)}`);
+  const error = new Error(
+    `GITHUB_HTTP_${code}: ${response.getContentText().slice(0, 500)}`,
+  );
   error.httpCode = code;
   throw error;
 }
@@ -263,9 +327,61 @@ function getSingleFileByName_(folder, name) {
   return file;
 }
 
-function moveTaskToRoot_(folder, destinationId) {
-  const destination = DriveApp.getFolderById(destinationId);
-  folder.moveTo(destination);
+function moveTaskToStatus_(taskFolder, statusRootId) {
+  const manifest = readManifestForRouting_(taskFolder);
+  const repoName =
+    typeof manifest.repo === 'string' && manifest.repo.includes('/')
+      ? manifest.repo.split('/').pop()
+      : '_invalid';
+  const branchName =
+    typeof manifest.branch === 'string' && manifest.branch
+      ? manifest.branch.replace(/\//g, '__')
+      : '_invalid';
+
+  const statusRoot = DriveApp.getFolderById(statusRootId);
+  const repoFolder = getOrCreateChildFolder_(
+    statusRoot,
+    safeFolderSegment_(repoName),
+  );
+  const branchFolder = getOrCreateChildFolder_(
+    repoFolder,
+    safeFolderSegment_(branchName),
+  );
+
+  taskFolder.moveTo(branchFolder);
+  return {
+    repoFolderId: repoFolder.getId(),
+    branchFolderId: branchFolder.getId(),
+  };
+}
+
+function getOrCreateChildFolder_(parent, name) {
+  const it = parent.getFoldersByName(name);
+  if (it.hasNext()) return it.next();
+  return parent.createFolder(name);
+}
+
+function safeFolderSegment_(value) {
+  const cleaned = String(value)
+    .replace(/[\\/:*?"<>|]/g, '__')
+    .replace(/\s+/g, '-')
+    .slice(0, 180);
+  return cleaned || '_invalid';
+}
+
+function cleanupEmptyFolders_(folderIds) {
+  folderIds.forEach(id => {
+    if (!id) return;
+    try {
+      const folder = DriveApp.getFolderById(id);
+      if (!folder.getFiles().hasNext() && !folder.getFolders().hasNext()) {
+        permanentlyDeleteDriveItem_(id);
+      }
+    } catch (_) {
+      // Cleanup is best-effort. It must never turn a successful asset delivery
+      // into a failed delivery.
+    }
+  });
 }
 
 function writeError_(folder, error, retryCount) {
@@ -274,11 +390,15 @@ function writeError_(folder, error, retryCount) {
 
   folder.createFile(
     'error.json',
-    JSON.stringify({
-      at: new Date().toISOString(),
-      retryCount,
-      message: String((error && error.message) || error),
-    }, null, 2),
+    JSON.stringify(
+      {
+        at: new Date().toISOString(),
+        retryCount,
+        message: String((error && error.message) || error),
+      },
+      null,
+      2,
+    ),
     MimeType.PLAIN_TEXT,
   );
 }
@@ -295,7 +415,9 @@ function permanentlyDeleteDriveItem_(fileId) {
 
   const code = r.getResponseCode();
   if (code !== 204 && code !== 404) {
-    throw new Error(`DRIVE_DELETE_FAILED_${code}: ${r.getContentText()}`);
+    throw new Error(
+      `DRIVE_DELETE_FAILED_${code}: ${r.getContentText()}`,
+    );
   }
 }
 
