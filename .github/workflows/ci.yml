@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate bridge foundation
+        run: node scripts/preflight.mjs
+      - name: Check Apps Script JavaScript syntax
+        run: cp gas/Code.gs /tmp/Code.js && node --check /tmp/Code.js
