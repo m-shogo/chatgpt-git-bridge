@@ -37,11 +37,46 @@
 ## P2 — Better batching
 
 必要になった時だけ導入。
+
+### Git transfer batching
 - 同一repo + branchの複数assetを1 commitにまとめる
 - 1task失敗時に他taskまで巻き戻さない設計
 - batch全体のSHA evidence
 
-v1で困らない限り急いで実装しない。
+### Image generation batching
+現時点では**1回のChatGPT Images依頼から複数の独立画像ファイルを安定生成できる前提にしない**。
+
+実測では「4枚」「5枚」「12枚」「別ファイル」「独立画像」「コラージュ禁止」と指示しても、1枚のコラージュへ統合される挙動を確認した。
+
+Current rule:
+
+```text
+1 image-generation call = 1 asset
+```
+
+複数assetが必要な場合:
+
+```text
+生成A
+→ 次ターンでAをDrive退避
+→ 生成B
+→ 次ターンでBをDrive退避
+→ 生成C
+...
+```
+
+### Re-evaluate multi-image batching when
+
+以下のどれかが成立した場合、`docs/EXPERIMENTS.md` のEXP-006を再実験する。
+
+- ChatGPT Images公式仕様に複数独立outputが明記される
+- UIに明示的な生成枚数指定が追加される
+- image generation toolが複数resultを返せるようになる
+- 通常ChatGPT runtimeが1ターンで複数image-generation callを安定実行できる
+
+再実験では「見た目が4分割された1PNG」をPASSにしない。**独立した4つ以上のファイル参照/bytesが返ること**を合格条件にする。
+
+v1で困らない限り、Git側のbatch commitも画像生成側の疑似batchも急いで複雑化しない。
 
 ## P3 — Less manual setup
 
