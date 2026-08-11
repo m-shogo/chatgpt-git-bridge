@@ -16,7 +16,7 @@ image + manifest.json
   ↓
 Google Apps Script（30分ごと）
   ↓
-repo allowlist / branch existence / SHA-256検証
+repo allowlist / branch existence / size / SHA-256検証
   ↓
 GitHub Contents API
   ↓
@@ -49,7 +49,11 @@ ChatGPT-Git-Bridge/
 │           ├─ image.png
 │           └─ manifest.json
 ├─ processing/
+│  └─ <repo>/
+│     └─ <branch-safe-name>/
 └─ failed/
+   └─ <repo>/
+      └─ <branch-safe-name>/
 ```
 
 例:
@@ -105,15 +109,16 @@ manifestは画像の「送り状」です。
 - GASの多重実行は `LockService` で止める。
 - 一時障害だけ限定回数retryする。
 - 永続エラーではDrive原本を消さず `failed` に残す。
+- v1では1asset 10 MiBを安全上限とし、大きいファイルを黙って処理しない。
 
 ## Success / failure
 
 ### Success
 
 ```text
-incoming
+incoming/<repo>/<branch>/<task>
   ↓
-processing
+processing/<repo>/<branch>/<task>
   ↓
 GitHub upload
   ↓
@@ -130,10 +135,12 @@ Drive task folderを永久削除
 
 ```text
 failed/
-└─ <task-id>/
-   ├─ image.png
-   ├─ manifest.json
-   └─ error.json
+└─ <repo>/
+   └─ <branch-safe-name>/
+      └─ <task-id>/
+         ├─ image.png
+         ├─ manifest.json
+         └─ error.json
 ```
 
 失敗時は原本を削除しません。
@@ -150,9 +157,14 @@ failed/
 │  └─ manifest.schema.json
 ├─ examples/
 │  └─ manifest.v1.example.json
+├─ scripts/
+│  └─ preflight.mjs
+├─ .github/workflows/
+│  └─ ci.yml
 └─ docs/
    ├─ SETUP.md
    ├─ OPERATIONS.md
+   ├─ TESTING.md
    ├─ DECISIONS.md
    ├─ EXPERIMENTS.md
    └─ ROADMAP.md
@@ -162,8 +174,11 @@ failed/
 - `gas/`: 現行bridge実装
 - `schema/`: machine-readableな契約
 - `examples/`: task作成例
+- `scripts/preflight.mjs`: schema・example・GASの最低契約を依存なしで検査
+- `.github/workflows/ci.yml`: push / PRごとのpreflight + GAS JavaScript構文検査
 - `SETUP.md`: 初回導入
 - `OPERATIONS.md`: 成功・失敗・retry・削除ルール
+- `TESTING.md`: 実証済みと未実証を分ける検証表
 - `DECISIONS.md`: なぜそう設計したか
 - `EXPERIMENTS.md`: 実際に試した結果。成功も失敗も残す
 - `ROADMAP.md`: 次に改善すること、現方式を捨てる条件
@@ -194,9 +209,12 @@ failed/
 | Git blob SHA完全一致 | PASS |
 | 再生成で完全同一画像を復元 | FAIL / 非保証 |
 | 巨大base64をChatGPT connectorから直接転送 | 非推奨 |
+| Bridge source/schema/docs preflight | CI導入済み |
 | Drive → GAS → GitHub 本番サイズPNG | **SETUP後の最終実証待ち** |
 
 「実証済み」と「設計上できる」を混同しないこと。
+
+詳細な検証表: [`docs/TESTING.md`](docs/TESTING.md)
 
 ## Evolution policy
 
