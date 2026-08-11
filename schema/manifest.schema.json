@@ -1,14 +1,25 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/m-shogo/chatgtp-image-to-git/schema/manifest.schema.json",
-  "title": "ChatGPT Image Transfer Manifest",
+  "title": "ChatGPT Image Transfer Manifest v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "taskId", "repo", "branch", "path", "sourceFile", "sha256"],
+  "required": [
+    "version",
+    "taskId",
+    "repo",
+    "branch",
+    "path",
+    "sourceFile",
+    "sha256"
+  ],
   "properties": {
     "version": { "const": 1 },
     "taskId": { "type": "string", "minLength": 1, "maxLength": 160 },
-    "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "repo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
     "branch": { "type": "string", "minLength": 1, "maxLength": 255 },
     "path": {
       "type": "string",
@@ -16,10 +27,18 @@
       "maxLength": 1024,
       "not": { "pattern": "(^/|\\.\\./|/\\.\\.|//)" }
     },
-    "sourceFile": { "type": "string", "minLength": 1, "maxLength": 255 },
-    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sourceFile": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "not": { "pattern": "[/\\\\]|\\.\\." }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "overwrite": { "type": "boolean", "default": false },
-    "keepOriginal": { "type": "boolean", "default": false },
+    "commitMessage": { "type": "string", "minLength": 1, "maxLength": 300 },
     "purpose": { "type": "string", "maxLength": 500 },
     "createdBy": { "type": "string", "default": "chatgpt-image" },
     "createdAt": { "type": "string", "format": "date-time" }
