@@ -77,9 +77,68 @@ NOT ADOPTED
 一時workflowやPRが増えやすい。
 現行推奨にはしない。
 
+## EXP-006 — ChatGPT UIで1回の依頼から複数の独立画像ファイルを生成できるか
+
+**Date:** 2026-08-12
+
+### Goal
+1回のユーザー依頼から、4枚以上の**独立した画像ファイル**を返せるか確認する。
+
+### Tests
+
+#### Test A — 「12枚生成」
+Result: FAIL
+
+1枚の画像の中に12個のシーンを並べたコラージュとして生成された。
+
+#### Test B — 「5枚の独立した画像ファイル」
+Result: FAIL
+
+5ファイルにはならず、1枚の画像内に5つのシーンをまとめたレイアウトになった。
+
+#### Test C — 「四季を4枚」「1枚ずつ」「別々の合計4画像」
+Result: FAIL
+
+複数回、表現を変えて明示したが、2x2の四季コラージュ1枚として生成された。
+
+#### Test D — 「コラージュ禁止」「独立ファイル」を強調
+Result: FAIL
+
+prompt上の表現を強くしても、独立ファイル出力を安定して強制できなかった。
+
+### Result
+PROMPT-ONLYではFAIL / 非保証
+
+### Learning
+- 「4枚」「別ファイル」「独立画像」と文章で指示するだけでは、ChatGPT Images UIが複数シーンを1キャンバスへ統合することがある。
+- これは単なるプロンプト品質問題として扱わない。
+- 現在の通常ChatGPT運用では、**1 image-generation call = 1 asset** と考えるのが安全。
+- 複数assetが必要なら、生成callを分けて1枚ずつ確実に作る。
+- 「独立画像複数出力が公式に安定サポートされた」と確認できるまでは、4枚バッチ前提の設計にしない。
+
+### Current best workflow
+
+```text
+Turn 1: image A generation
+Turn 2: A → Drive + manifest, then image B generation
+Turn 3: B → Drive + manifest, then image C generation
+...
+```
+
+Drive/GAS bridgeにより、前ターンのassetを退避してから次の1枚を生成する。
+
+### Re-test condition
+
+以下のどれかが起きたら再実験する。
+
+- ChatGPT Images公式仕様に複数独立outputが明記された
+- image generation toolが複数resultを返す仕様になった
+- ChatGPT runtimeが1ターンで複数のimage generation callを安定実行できるようになった
+- UIに枚数指定が追加された
+
 ## Next experiments
 
-### EXP-006 — Drive → GAS → GitHub full-size PNG
+### EXP-007 — Drive → GAS → GitHub full-size PNG
 
 Acceptance criteria:
 - 2.78MB PNGをDriveから取得
@@ -88,7 +147,7 @@ Acceptance criteria:
 - 成功後、Drive task folder（image + manifest）削除
 - 同じtask再実行で追加commitなし
 
-### EXP-007 — failure recovery
+### EXP-008 — failure recovery
 
 Test cases:
 - nonexistent branch
