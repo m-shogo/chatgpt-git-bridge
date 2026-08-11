@@ -1,0 +1,8 @@
+# Apps Script > Project Settings > Script Properties
+# 左側がProperty、右側がValueです。
+
+GITHUB_TOKEN=ここにFine-grained-PATを貼る
+ALLOWED_REPOS=m-shogo/minefa
+
+# repoを増やす場合:
+# ALLOWED_REPOS=m-shogo/minefa,m-shogo/vamp-pon,m-shogo/wedding-project
