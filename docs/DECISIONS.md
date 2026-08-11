@@ -3,6 +3,21 @@
 このファイルは「なぜ今この方式なのか」を残す。
 新しい方式に変えるときは、古い判断を消さず追記する。
 
+## 2026-08-11 — 専用repoを仕組みのAuthorityにする
+
+### Decision
+- `m-shogo/chatgtp-image-to-git` をbridgeの実装・仕様・運用・実験・学習の唯一の正本にする。
+- 対象プロダクトrepoへbridge実装そのものを複製しない。
+- 対象repoには生成された最終assetだけを置く。
+
+### Why
+- プロダクトrepoごとにbridgeが分岐すると、修正漏れ・古い実装・二重管理が発生する。
+- ChatGPT / Drive / GitHubの仕様変更時に一箇所だけ更新すればよくなる。
+- 成功だけでなく失敗も学習資産として蓄積できる。
+
+### Reconsider when
+- bridgeが不要になる公式native連携が提供されたとき。
+
 ## 2026-08-11 — Driveを一時配送キューにする
 
 ### Decision
