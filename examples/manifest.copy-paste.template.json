@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "taskId": "CHANGE_ME_UNIQUE_TASK_ID",
+  "repo": "m-shogo/minefa",
+  "branch": "CHANGE_ME_BRANCH",
+  "path": "CHANGE_ME_GIT_PATH/image.png",
+  "sourceFile": "image.png",
+  "sha256": "CHANGE_ME_64_CHAR_SHA256",
+  "overwrite": false,
+  "purpose": "CHANGE_ME_PURPOSE",
+  "createdBy": "chatgpt-image"
+}
