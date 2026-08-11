@@ -5,6 +5,40 @@ ChatGPTで生成した画像を、Codex / Work の利用枠やコンテキスト
 > このrepoは画像置き場ではありません。
 > 画像本体は最終的な対象repoへ保存し、このrepoには橋渡しの仕組み、判断、失敗、改善履歴を残します。
 
+## 🚀 初めて設定する人はここだけ
+
+**[`docs/SETUP.md`](docs/SETUP.md) を上から順番に進めてください。**
+
+Driveフォルダはすでに作成済み、`Code.gs` も現在のfolder ID設定済みです。
+
+自分で入力する値は基本この2つだけです。
+
+```text
+GITHUB_TOKEN = 自分のFine-grained PAT
+ALLOWED_REPOS = m-shogo/minefa
+```
+
+コピー用テンプレート:
+
+- [`examples/script-properties.template.txt`](examples/script-properties.template.txt)
+- [`examples/manifest.copy-paste.template.json`](examples/manifest.copy-paste.template.json)
+
+セットアップ順序:
+
+```text
+PAT作成
+→ Apps Script作成
+→ Code.gs貼る
+→ appsscript.json貼る
+→ Script Properties 2個設定
+→ processQueue()初回認可
+→ install30MinuteTrigger()
+→ first-proof
+→ 完了
+```
+
+---
+
 ## Current best — 2026-08-11
 
 ```text
@@ -156,7 +190,9 @@ failed/
 ├─ schema/
 │  └─ manifest.schema.json
 ├─ examples/
-│  └─ manifest.v1.example.json
+│  ├─ manifest.v1.example.json
+│  ├─ manifest.copy-paste.template.json
+│  └─ script-properties.template.txt
 ├─ scripts/
 │  └─ preflight.mjs
 ├─ .github/workflows/
@@ -173,30 +209,15 @@ failed/
 - `README.md`: 現在の正解と入口
 - `gas/`: 現行bridge実装
 - `schema/`: machine-readableな契約
-- `examples/`: task作成例
+- `examples/`: コピペ用設定・task作成例
 - `scripts/preflight.mjs`: schema・example・GASの最低契約を依存なしで検査
 - `.github/workflows/ci.yml`: push / PRごとのpreflight + GAS JavaScript構文検査
-- `SETUP.md`: 初回導入
+- `SETUP.md`: **初回はここだけ読めばよい設定手順**
 - `OPERATIONS.md`: 成功・失敗・retry・削除ルール
 - `TESTING.md`: 実証済みと未実証を分ける検証表
 - `DECISIONS.md`: なぜそう設計したか
 - `EXPERIMENTS.md`: 実際に試した結果。成功も失敗も残す
 - `ROADMAP.md`: 次に改善すること、現方式を捨てる条件
-
-## Setup
-
-詳細: [`docs/SETUP.md`](docs/SETUP.md)
-
-最低限必要なのは次です。
-
-1. Google Apps Script projectを1つ作る。
-2. `gas/Code.gs` と `gas/appsscript.json` を反映。
-3. fine-grained GitHub PATをApps ScriptのScript Propertiesへ `GITHUB_TOKEN` として保存。
-4. `ALLOWED_REPOS` に対象repoを列挙。
-5. `processQueue()` を手動で1回実行してGoogle権限を許可。
-6. `install30MinuteTrigger()` を1回実行。
-
-以後は基本的に `incoming` へ画像 + manifestを置くだけです。
 
 ## Current verification status
 
