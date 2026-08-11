@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "taskId": "20260811-minefa-feature-top-redesign-bg-001",
+  "repo": "m-shogo/minefa",
+  "branch": "feature/top-redesign",
+  "path": "src/assets/generated/top/evening-station.png",
+  "sourceFile": "evening-station.png",
+  "sha256": "2a91eab2b575bed316571ec067d4f055bdcef9f8970c23444f6876eb26604671",
+  "overwrite": false,
+  "purpose": "TOP画面用の夕景背景",
+  "createdBy": "chatgpt-image",
+  "createdAt": "2026-08-11T20:40:00+09:00"
+}
