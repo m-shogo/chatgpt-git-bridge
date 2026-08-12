@@ -136,26 +136,102 @@ Drive/GAS bridgeにより、前ターンのassetを退避してから次の1枚�
 - ChatGPT runtimeが1ターンで複数のimage generation callを安定実行できるようになった
 - UIに枚数指定が追加された
 
-## Next experiments
+## EXP-007 — Drive → GAS → GitHub full-size PNG
 
-### EXP-007 — Drive → GAS → GitHub full-size PNG
+**Date:** 2026-08-12
 
-Acceptance criteria:
-- 2.78MB PNGをDriveから取得
-- 指定repo/branch/pathへ保存
-- source SHA-256 == Git read-back SHA-256
-- 成功後、Drive task folder（image + manifest）削除
-- 同じtask再実行で追加commitなし
+### Result
+PASS
 
-### EXP-008 — failure recovery
+### Evidence
+- source: 2,778,816 byte PNG
+- target repo: `m-shogo/bk_soropon-product`
+- branch: `master`
+- path: `public/generated/chatgpt-evening-station-proof.png`
+- GitHub上に実画像fileが作成された
+- 成功後task原本はDrive queueから除去された
 
-Test cases:
+### First-run failure
+
+最初の実行ではGitHub APIの404を `BRANCH_NOT_FOUND` と判定した。
+実際にはbranch `master` は存在しており、Fine-grained PATのRepository access不足だった。
+PATを `All repositories` + `Contents: Read and write` に修正後、同じ原本taskを再実行してPASSした。
+
+### Learning
+- GitHubの404は「branchが存在しない」とは限らない。private repoがtokenから見えない場合も404になる。
+- branch endpointだけを見て原因を断定してはいけない。
+- 先にrepo endpointをtoken付きで確認し、`REPO_NOT_VISIBLE_TO_TOKEN` と `BRANCH_NOT_FOUND` を分離する。
+- エラー時に原本を削除せずfailedへ退避したため、再生成なしで復旧できた。この設計は正しかった。
+
+## EXP-008 — failure recovery / folder cleanup
+
+**Date:** 2026-08-12
+
+### Result
+PARTIAL PASS / implementation strengthened
+
+### Observed issue
+
+taskを `incoming` → `processing` または `failed` にmoveした後、元の
+`incoming/<repo>/<branch>/` が空のまま残った。
+
+### Root cause
+
+旧実装はprocessing側の親folderだけcleanup対象にしており、move前のsource parent chainを保存していなかった。
+
+### Fix
+
+- move前にtaskのsource parent chainをcapture
+- move直後に空source branch/repoを削除
+- `processQueue()` 最後にもincoming / processing全体の空branch/repoをbest-effort cleanup
+- cleanup失敗は配送成功を失敗扱いにしない
+
+### Error diagnosis hardening
+
+GitHubアクセス確認を次の順番へ変更した。
+
+```text
+ALLOWED_REPOS
+↓
+repo endpoint
+  404 → REPO_NOT_VISIBLE_TO_TOKEN
+  401 → GITHUB_TOKEN_INVALID_OR_EXPIRED
+  403 → GITHUB_REPO_FORBIDDEN
+↓
+branch endpoint
+  404 → BRANCH_NOT_FOUND
+↓
+asset upload
+↓
+read-back SHA verification
+```
+
+これにより、今回のような「PAT設定不足をbranch不存在と誤診する」ケースを減らす。
+
+### Remaining failure cases to test
+
 - nonexistent branch
 - same path / different SHA
-- invalid repo
-- bad token
+- invalid repo / owner outside allowlist
+- expired token
 - 429 / temporary GitHub error
 - process interruption after upload but before Drive delete
+- cleanup API failure
 
-Expected:
-原本を失わず、retryしても二重commitしない。
+### Expected
+
+原本を失わず、retryしても二重commitしない。成功したqueue階層には空folderを残さない。
+
+## Trigger decision — 5 minutes
+
+1分triggerもGAS仕様上は可能だが、常時空queueでも実行回数が増える。
+現行v1は **5分triggerを標準** とする。
+
+`install5MinuteTrigger()` は既存 `processQueue` triggerを削除してから1つだけ再作成するため、30分triggerとの二重実行を防ぐ。
+
+## Next experiments
+
+- EXP-009: nonexistent branchが正しく `BRANCH_NOT_FOUND` になる
+- EXP-010: tokenから見えないprivate repoが `REPO_NOT_VISIBLE_TO_TOKEN` になる
+- EXP-011: same path / different SHA + overwrite=falseが原本保持でfailedへ行く
+- EXP-012: upload成功後・Drive削除前の中断からidempotent復旧できる
