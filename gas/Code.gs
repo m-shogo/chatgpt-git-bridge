@@ -65,7 +65,6 @@ function processTaskSafely_(taskFolder) {
         ]);
       }
 
-      // failedRoute intentionally stays. It is the human-readable evidence path.
       void failedRoute;
     }
   }
@@ -75,8 +74,7 @@ function processTask_(taskFolder) {
   const manifest = readManifest_(taskFolder);
   validateManifest_(manifest);
 
-  const allowed = getAllowedRepos_();
-  if (!allowed.includes(manifest.repo)) {
+  if (!isRepoAllowed_(manifest.repo)) {
     throw new Error(`REPO_NOT_ALLOWED: ${manifest.repo}`);
   }
 
@@ -114,7 +112,7 @@ function processTask_(taskFolder) {
     const currentSha = sha256Hex_(currentBytes);
 
     if (currentSha === localSha) {
-      return; // Idempotent success. No duplicate commit.
+      return;
     }
 
     if (!manifest.overwrite) {
@@ -131,7 +129,6 @@ function processTask_(taskFolder) {
     manifest.commitMessage,
   );
 
-  // HTTP success alone is insufficient. Verify the stored bytes from GitHub.
   const remoteBytes = getGithubRawBytes_(
     manifest.repo,
     manifest.path,
@@ -183,10 +180,29 @@ function validateManifest_(m) {
   }
 }
 
-function getAllowedRepos_() {
+/**
+ * ALLOWED_REPOS examples:
+ *
+ * m-shogo/*
+ * m-shogo/minefa,m-shogo/vamp-pon
+ * m-shogo/*,another-owner/specific-repo
+ *
+ * A wildcard is owner-scoped only. A global '*' is intentionally unsupported.
+ */
+function getAllowedRepoRules_() {
   const raw =
     PropertiesService.getScriptProperties().getProperty('ALLOWED_REPOS') || '';
   return raw.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function isRepoAllowed_(repo) {
+  return getAllowedRepoRules_().some(rule => {
+    if (/^[A-Za-z0-9_.-]+\/\*$/.test(rule)) {
+      const owner = rule.slice(0, -2);
+      return repo.startsWith(`${owner}/`);
+    }
+    return repo === rule;
+  });
 }
 
 function githubHeaders_(accept) {
@@ -378,8 +394,7 @@ function cleanupEmptyFolders_(folderIds) {
         permanentlyDeleteDriveItem_(id);
       }
     } catch (_) {
-      // Cleanup is best-effort. It must never turn a successful asset delivery
-      // into a failed delivery.
+      // Cleanup is best-effort.
     }
   });
 }
