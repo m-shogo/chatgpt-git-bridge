@@ -1,4 +1,4 @@
-# chatgtp-image-to-git
+# ChatGPT-Git-Bridge
 
 画像ファイルを Google Drive の一時配送キューへ置き、Google Apps Script (GAS) が対象 GitHub repo / branch / path へ安全に配送するための**実装・仕様・検証・学習の正本repo**です。
 
