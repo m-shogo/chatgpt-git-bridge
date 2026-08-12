@@ -2,7 +2,8 @@
 # 左側がProperty、右側がValueです。
 
 GITHUB_TOKEN=ここにFine-grained-PATを貼る
-ALLOWED_REPOS=m-shogo/minefa
+ALLOWED_REPOS=m-shogo/*
 
-# repoを増やす場合:
-# ALLOWED_REPOS=m-shogo/minefa,m-shogo/vamp-pon,m-shogo/wedding-project
+# m-shogo配下のrepoをGAS側では自動許可します。
+# 実際に書き込めるかはGitHub PAT側のRepository accessにも依存します。
+# グローバルな * は未対応・非推奨です。
