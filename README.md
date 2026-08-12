@@ -131,6 +131,57 @@ Drive階層は人間向け整理で、**配送先の正本はmanifest.json**で�
 - GitHub 404を即branch不存在と断定しない。repo visibilityを先に確認する。
 - trigger install関数をRunしただけで完了扱いにしない。**トリガー一覧で実在確認する。**
 
+## Cross-repository bug reporting — 重要
+
+このBridgeを使っている**別repoでBridge由来の不具合・改善点を発見した場合、このrepoを不具合受付・学習の正本として使う。**
+
+### どこへIssueを作る？
+
+```text
+画像そのもの・UI・CSS・ゲーム実装など配送先repo固有の問題
+→ 発生元repo
+
+manifest / Drive queue / GAS / trigger / GitHub配送 / SHA検証 / cleanup / failed recovery
+→ m-shogo/chatgpt-git-bridge
+
+原因不明
+→ まず発生元repoで調査
+→ Bridge起因と判明した時点でchatgpt-git-bridgeへIssueを作り相互参照
+```
+
+**他repoを作業しているChatGPT / Codex / Claude等のAIも、Bridge起因と判断できる不具合を見つけた場合は、可能なら `m-shogo/chatgpt-git-bridge` にIssueを作成してよい。** 単なる会話上の反省で終わらせず、Issue → 原因 → 修正 → 検証 → docs/EXPERIMENTSへの学習反映まで繋げる。
+
+Issueタイトル推奨:
+
+```text
+[bridge-bug] <source-repo>: <short problem>
+[bridge-request] <source-repo>: <requested improvement>
+```
+
+Issueに最低限残す情報:
+
+- 発生元repo
+- branch / commit（分かる場合）
+- taskId
+- manifestの関連項目（token等のsecretは絶対に貼らない）
+- expected / actual
+- `error.json` の安全な内容
+- 再現手順
+- Bridge起因と判断した根拠
+- Drive原本が `failed` に保持されているか
+- severity / 影響範囲
+
+### Cross-repo issue rules
+
+- secret / PAT / private credentialをIssueへ貼らない。
+- Bridge起因と確認できない問題を無理にBridgeへ集約しない。
+- 同じ原因のIssueが既にあれば重複Issueを増やさず既存Issueへ情報を追記する。
+- 発生元repoにも追跡が必要ならBridge Issue番号を残して相互参照する。
+- 修正後は再現taskまたは同等のE2EでPASSを確認してからcloseする。
+- 新しい失敗パターンや再発防止策は [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) / README / checkerへ昇格する。
+
+Issue記載用テンプレート: [`docs/BRIDGE_BUG_REPORT.md`](docs/BRIDGE_BUG_REPORT.md)
+
 ## 今回見つかった失敗と再発防止
 
 | Failure | Root cause | Prevention |
