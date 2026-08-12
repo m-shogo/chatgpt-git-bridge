@@ -29,6 +29,8 @@ function processQueue() {
     ].slice(0, CONFIG.maxTasksPerRun);
 
     tasks.forEach(processTaskSafely_);
+    cleanupStatusTree_(CONFIG.incomingFolderId);
+    cleanupStatusTree_(CONFIG.processingFolderId);
   } finally {
     lock.releaseLock();
   }
@@ -37,18 +39,21 @@ function processQueue() {
 function processTaskSafely_(taskFolder) {
   const props = PropertiesService.getScriptProperties();
   const retryKey = `retry:${taskFolder.getId()}`;
+  const sourceParents = captureParentChain_(taskFolder);
   let processingRoute = null;
 
   try {
     processingRoute = moveTaskToStatus_(taskFolder, CONFIG.processingFolderId);
+    cleanupEmptyFoldersDeep_(sourceParents);
+
     processTask_(taskFolder);
     props.deleteProperty(retryKey);
 
-    const parentIds = processingRoute
-      ? [processingRoute.branchFolderId, processingRoute.repoFolderId]
-      : [];
     permanentlyDeleteDriveItem_(taskFolder.getId());
-    cleanupEmptyFolders_(parentIds);
+    cleanupEmptyFoldersDeep_([
+      processingRoute.branchFolderId,
+      processingRoute.repoFolderId,
+    ]);
   } catch (error) {
     const retries = Number(props.getProperty(retryKey) || '0') + 1;
     props.setProperty(retryKey, String(retries));
@@ -59,7 +64,7 @@ function processTaskSafely_(taskFolder) {
       props.deleteProperty(retryKey);
 
       if (processingRoute) {
-        cleanupEmptyFolders_([
+        cleanupEmptyFoldersDeep_([
           processingRoute.branchFolderId,
           processingRoute.repoFolderId,
         ]);
@@ -78,6 +83,7 @@ function processTask_(taskFolder) {
     throw new Error(`REPO_NOT_ALLOWED: ${manifest.repo}`);
   }
 
+  assertRepoAccessible_(manifest.repo);
   assertBranchExists_(manifest.repo, manifest.branch);
 
   const source = getSingleFileByName_(taskFolder, manifest.sourceFile);
@@ -180,15 +186,6 @@ function validateManifest_(m) {
   }
 }
 
-/**
- * ALLOWED_REPOS examples:
- *
- * m-shogo/*
- * m-shogo/minefa,m-shogo/vamp-pon
- * m-shogo/*,another-owner/specific-repo
- *
- * A wildcard is owner-scoped only. A global '*' is intentionally unsupported.
- */
 function getAllowedRepoRules_() {
   const raw =
     PropertiesService.getScriptProperties().getProperty('ALLOWED_REPOS') || '';
@@ -217,6 +214,28 @@ function githubHeaders_(accept) {
   };
 }
 
+function assertRepoAccessible_(repo) {
+  const url = `https://api.github.com/repos/${repo}`;
+  const r = UrlFetchApp.fetch(url, {
+    headers: githubHeaders_(),
+    muteHttpExceptions: true,
+  });
+
+  const code = r.getResponseCode();
+  if (code === 404) {
+    throw new Error(
+      `REPO_NOT_VISIBLE_TO_TOKEN: ${repo} (check Fine-grained PAT Repository access)`,
+    );
+  }
+  if (code === 401) {
+    throw new Error('GITHUB_TOKEN_INVALID_OR_EXPIRED');
+  }
+  if (code === 403) {
+    throw new Error(`GITHUB_REPO_FORBIDDEN: ${repo}`);
+  }
+  assertGithubSuccess_(r);
+}
+
 function assertBranchExists_(repo, branch) {
   const url =
     `https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`;
@@ -225,8 +244,15 @@ function assertBranchExists_(repo, branch) {
     muteHttpExceptions: true,
   });
 
-  if (r.getResponseCode() === 404) {
+  const code = r.getResponseCode();
+  if (code === 404) {
     throw new Error(`BRANCH_NOT_FOUND: ${repo}@${branch}`);
+  }
+  if (code === 401) {
+    throw new Error('GITHUB_TOKEN_INVALID_OR_EXPIRED');
+  }
+  if (code === 403) {
+    throw new Error(`GITHUB_BRANCH_FORBIDDEN: ${repo}@${branch}`);
   }
   assertGithubSuccess_(r);
 }
@@ -343,6 +369,20 @@ function getSingleFileByName_(folder, name) {
   return file;
 }
 
+function captureParentChain_(taskFolder) {
+  const out = [];
+  let current = taskFolder;
+
+  for (let i = 0; i < 2; i += 1) {
+    const parents = current.getParents();
+    if (!parents.hasNext()) break;
+    current = parents.next();
+    out.push(current.getId());
+  }
+
+  return out;
+}
+
 function moveTaskToStatus_(taskFolder, statusRootId) {
   const manifest = readManifestForRouting_(taskFolder);
   const repoName =
@@ -385,7 +425,7 @@ function safeFolderSegment_(value) {
   return cleaned || '_invalid';
 }
 
-function cleanupEmptyFolders_(folderIds) {
+function cleanupEmptyFoldersDeep_(folderIds) {
   folderIds.forEach(id => {
     if (!id) return;
     try {
@@ -394,9 +434,30 @@ function cleanupEmptyFolders_(folderIds) {
         permanentlyDeleteDriveItem_(id);
       }
     } catch (_) {
-      // Cleanup is best-effort.
+      // Best effort cleanup only.
     }
   });
+}
+
+function cleanupStatusTree_(rootId) {
+  try {
+    const root = DriveApp.getFolderById(rootId);
+    const repos = root.getFolders();
+    const repoIds = [];
+
+    while (repos.hasNext()) {
+      const repo = repos.next();
+      const branches = repo.getFolders();
+      const branchIds = [];
+      while (branches.hasNext()) branchIds.push(branches.next().getId());
+      cleanupEmptyFoldersDeep_(branchIds);
+      repoIds.push(repo.getId());
+    }
+
+    cleanupEmptyFoldersDeep_(repoIds);
+  } catch (_) {
+    // Best effort cleanup only.
+  }
 }
 
 function writeError_(folder, error, retryCount) {
@@ -436,10 +497,10 @@ function permanentlyDeleteDriveItem_(fileId) {
   }
 }
 
-function install30MinuteTrigger() {
+function install5MinuteTrigger() {
   ScriptApp.getProjectTriggers()
     .filter(t => t.getHandlerFunction() === 'processQueue')
     .forEach(t => ScriptApp.deleteTrigger(t));
 
-  ScriptApp.newTrigger('processQueue').timeBased().everyMinutes(30).create();
+  ScriptApp.newTrigger('processQueue').timeBased().everyMinutes(5).create();
 }
